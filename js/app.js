@@ -1,5 +1,5 @@
 // 全局变量
-let selectedAPIs = JSON.parse(localStorage.getItem('selectedAPIs') || '["heimuer"]'); // 默认选中黑木耳
+let selectedAPIs = JSON.parse(localStorage.getItem('selectedAPIs') || '["tyyszy", "bfzy", "ruyi"]'); // 默认选中天涯资源、暴风资源和如意资源
 let customAPIs = JSON.parse(localStorage.getItem('customAPIs') || '[]'); // 存储自定义API列表
 
 // 添加当前播放的集数索引
@@ -27,14 +27,17 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // 设置默认API选择（如果是第一次加载）
     if (!localStorage.getItem('hasInitializedDefaults')) {
-        // 仅选择黑木耳源
-        selectedAPIs = ["heimuer"];
+        // 仅选择天涯资源、暴风资源和如意资源
+        selectedAPIs = ["tyyszy", "bfzy", "ruyi"];
         localStorage.setItem('selectedAPIs', JSON.stringify(selectedAPIs));
         
         // 默认选中过滤开关
         localStorage.setItem('yellowFilterEnabled', 'true');
         localStorage.setItem(PLAYER_CONFIG.adFilteringStorage, 'true');
         
+        // 默认启用豆瓣功能
+        localStorage.setItem('doubanEnabled', 'true');
+
         // 标记已初始化默认值
         localStorage.setItem('hasInitializedDefaults', 'true');
     }
@@ -64,10 +67,13 @@ function initAPICheckboxes() {
     container.innerHTML = '';
 
     // 添加普通API组标题
+    const normaldiv = document.createElement('div');
+    normaldiv.id = 'normaldiv';
+    normaldiv.className = 'grid grid-cols-2 gap-2';
     const normalTitle = document.createElement('div');
     normalTitle.className = 'api-group-title';
     normalTitle.textContent = '普通资源';
-    container.appendChild(normalTitle);
+    normaldiv.appendChild(normalTitle);
     
     // 创建普通API源的复选框
     Object.keys(API_SITES).forEach(apiKey => {
@@ -85,7 +91,7 @@ function initAPICheckboxes() {
                    data-api="${apiKey}">
             <label for="api_${apiKey}" class="ml-1 text-xs text-gray-400 truncate">${api.name}</label>
         `;
-        container.appendChild(checkbox);
+        normaldiv.appendChild(checkbox);
         
         // 添加事件监听器
         checkbox.querySelector('input').addEventListener('change', function() {
@@ -93,10 +99,25 @@ function initAPICheckboxes() {
             checkAdultAPIsSelected();
         });
     });
-    
+    container.appendChild(normaldiv);
+
+    // 添加成人API列表
+    addAdultAPI();
+
+    // 初始检查成人内容状态
+    checkAdultAPIsSelected();
+}
+
+// 添加成人API列表
+function addAdultAPI() {
     // 仅在隐藏设置为false时添加成人API组
-    if (!HIDE_BUILTIN_ADULT_APIS) {
+    if (!HIDE_BUILTIN_ADULT_APIS && (localStorage.getItem('yellowFilterEnabled') === 'false')) {
+        const container = document.getElementById('apiCheckboxes');
+
         // 添加成人API组标题
+        const adultdiv = document.createElement('div');
+        adultdiv.id = 'adultdiv';
+        adultdiv.className = 'grid grid-cols-2 gap-2';
         const adultTitle = document.createElement('div');
         adultTitle.className = 'api-group-title adult';
         adultTitle.innerHTML = `黄色资源采集站 <span class="adult-warning">
@@ -104,7 +125,7 @@ function initAPICheckboxes() {
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
             </svg>
         </span>`;
-        container.appendChild(adultTitle);
+        adultdiv.appendChild(adultTitle);
         
         // 创建成人API源的复选框
         Object.keys(API_SITES).forEach(apiKey => {
@@ -122,7 +143,7 @@ function initAPICheckboxes() {
                        data-api="${apiKey}">
                 <label for="api_${apiKey}" class="ml-1 text-xs text-pink-400 truncate">${api.name}</label>
             `;
-            container.appendChild(checkbox);
+            adultdiv.appendChild(checkbox);
             
             // 添加事件监听器
             checkbox.querySelector('input').addEventListener('change', function() {
@@ -130,10 +151,8 @@ function initAPICheckboxes() {
                 checkAdultAPIsSelected();
             });
         });
+        container.appendChild(adultdiv);
     }
-    
-    // 初始检查成人内容状态
-    checkAdultAPIsSelected();
 }
 
 // 检查是否有成人API被选中
@@ -525,6 +544,19 @@ function setupEventListeners() {
     if (yellowFilterToggle) {
         yellowFilterToggle.addEventListener('change', function(e) {
             localStorage.setItem('yellowFilterEnabled', e.target.checked);
+
+            // 控制黄色内容接口的显示状态
+            const adultdiv = document.getElementById('adultdiv');
+            if (adultdiv) {
+                if (e.target.checked === true) {
+                    adultdiv.style.display = 'none';
+                } else if (e.target.checked === false) {
+                    adultdiv.style.display = ''
+                }
+            } else {
+                // 添加成人API列表
+                addAdultAPI();
+            }
         });
     }
     
@@ -553,6 +585,11 @@ function resetSearchArea() {
     if (footer) {
         footer.style.position = '';
     }
+    
+    // 如果有豆瓣功能，检查是否需要显示豆瓣推荐区域
+    if (typeof updateDoubanVisibility === 'function') {
+        updateDoubanVisibility();
+    }
 }
 
 // 获取自定义API信息
@@ -566,6 +603,13 @@ function getCustomApiInfo(customApiIndex) {
 
 // 搜索功能 - 修改为支持多选API
 async function search() {
+    // 密码保护校验
+    if (window.isPasswordProtected && window.isPasswordVerified) {
+        if (window.isPasswordProtected() && !window.isPasswordVerified()) {
+            showPasswordModal && showPasswordModal();
+            return;
+        }
+    }
     const query = document.getElementById('searchInput').value.trim();
     
     if (!query) {
@@ -651,10 +695,22 @@ async function search() {
             }
         });
         
+        // 更新搜索结果计数
+        const searchResultsCount = document.getElementById('searchResultsCount');
+        if (searchResultsCount) {
+            searchResultsCount.textContent = allResults.length;
+        }
+        
         // 显示结果区域，调整搜索区域
         document.getElementById('searchArea').classList.remove('flex-1');
         document.getElementById('searchArea').classList.add('mb-8');
         document.getElementById('resultsArea').classList.remove('hidden');
+        
+        // 隐藏豆瓣推荐区域（如果存在）
+        const doubanArea = document.getElementById('doubanArea');
+        if (doubanArea) {
+            doubanArea.classList.add('hidden');
+        }
         
         const resultsDiv = document.getElementById('results');
         
@@ -677,7 +733,7 @@ async function search() {
         // 处理搜索结果过滤：如果启用了黄色内容过滤，则过滤掉分类含有敏感内容的项目
         const yellowFilterEnabled = localStorage.getItem('yellowFilterEnabled') === 'true';
         if (yellowFilterEnabled) {
-            const banned = ['伦理片','门事件','萝莉少女','制服诱惑','国产传媒','cosplay','黑丝诱惑','无码','日本无码','有码','日本有码','SWAG','网红主播', '色情片','同性片','福利视频','福利片'];
+            const banned = ['伦理片','福利','里番动漫','门事件','萝莉少女','制服诱惑','国产传媒','cosplay','黑丝诱惑','无码','日本无码','有码','日本有码','SWAG','网红主播', '色情片','同性片','福利视频','福利片'];
             allResults = allResults.filter(item => {
                 const typeName = item.type_name || '';
                 return !banned.some(keyword => typeName.includes(keyword));
@@ -686,43 +742,40 @@ async function search() {
 
         // 添加XSS保护，使用textContent和属性转义
         resultsDiv.innerHTML = allResults.map(item => {
-            // ...existing code for rendering results...
             const safeId = item.vod_id ? item.vod_id.toString().replace(/[^\w-]/g, '') : '';
             const safeName = (item.vod_name || '').toString()
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;')
                 .replace(/"/g, '&quot;');
             const sourceInfo = item.source_name ? 
-                `<span class="bg-[#222] text-xs px-2 py-1 rounded-full">${item.source_name}</span>` : '';
+                `<span class="bg-[#222] text-xs px-1.5 py-0.5 rounded-full">${item.source_name}</span>` : '';
             const sourceCode = item.source_code || '';
             
             // 添加API URL属性，用于详情获取
             const apiUrlAttr = item.api_url ? 
                 `data-api-url="${item.api_url.replace(/"/g, '&quot;')}"` : '';
             
-            // 重新设计的卡片布局 - 支持更好的封面图显示
+            // 修改为水平卡片布局，图片在左侧，文本在右侧，并优化样式
             const hasCover = item.vod_pic && item.vod_pic.startsWith('http');
             
             return `
-                <div class="card-hover bg-[#111] rounded-lg overflow-hidden cursor-pointer transition-all hover:scale-[1.02] h-full" 
+                <div class="card-hover bg-[#111] rounded-lg overflow-hidden cursor-pointer transition-all hover:scale-[1.02] h-full shadow-sm hover:shadow-md" 
                      onclick="showDetails('${safeId}','${safeName}','${sourceCode}')" ${apiUrlAttr}>
-                    <div class="md:flex">
+                    <div class="flex h-full">
                         ${hasCover ? `
-                        <div class="md:w-1/4 relative overflow-hidden">
-                            <div class="w-full h-40 md:h-full">
-                                <img src="${item.vod_pic}" alt="${safeName}" 
-                                     class="w-full h-full object-cover transition-transform hover:scale-110" 
-                                     onerror="this.onerror=null; this.src='https://via.placeholder.com/300x450?text=无封面'; this.classList.add('object-contain');" 
-                                     loading="lazy">
-                                <div class="absolute inset-0 bg-gradient-to-t from-[#111] to-transparent opacity-60"></div>
-                            </div>
+                        <div class="relative flex-shrink-0 search-card-img-container">
+                            <img src="${item.vod_pic}" alt="${safeName}" 
+                                 class="h-full w-full object-cover transition-transform hover:scale-110" 
+                                 onerror="this.onerror=null; this.src='https://via.placeholder.com/300x450?text=无封面'; this.classList.add('object-contain');" 
+                                 loading="lazy">
+                            <div class="absolute inset-0 bg-gradient-to-r from-black/30 to-transparent"></div>
                         </div>` : ''}
                         
-                        <div class="p-3 flex flex-col flex-grow ${hasCover ? 'md:w-3/4' : 'w-full'}">
+                        <div class="p-2 flex flex-col flex-grow">
                             <div class="flex-grow">
-                                <h3 class="text-lg font-semibold mb-2 break-words">${safeName}</h3>
+                                <h3 class="font-semibold mb-2 break-words line-clamp-2 ${hasCover ? '' : 'text-center'}" title="${safeName}">${safeName}</h3>
                                 
-                                <div class="flex flex-wrap gap-1 mb-2">
+                                <div class="flex flex-wrap ${hasCover ? '' : 'justify-center'} gap-1 mb-2">
                                     ${(item.type_name || '').toString().replace(/</g, '&lt;') ? 
                                       `<span class="text-xs py-0.5 px-1.5 rounded bg-opacity-20 bg-blue-500 text-blue-300">
                                           ${(item.type_name || '').toString().replace(/</g, '&lt;')}
@@ -732,22 +785,23 @@ async function search() {
                                           ${item.vod_year}
                                       </span>` : ''}
                                 </div>
-                                <p class="text-gray-400 text-xs h-9 overflow-hidden">
+                                <p class="text-gray-400 line-clamp-2 overflow-hidden ${hasCover ? '' : 'text-center'} mb-2">
                                     ${(item.vod_remarks || '暂无介绍').toString().replace(/</g, '&lt;')}
                                 </p>
                             </div>
                             
-                            <div class="flex justify-between items-center mt-2 pt-2 border-t border-gray-800">
+                            <div class="flex justify-between items-center mt-1 pt-1 border-t border-gray-800">
                                 ${sourceInfo ? `<div>${sourceInfo}</div>` : '<div></div>'}
+                                <!-- 接口名称过长会被挤变形
                                 <div>
-                                    <span class="text-xs text-gray-500 flex items-center">
-                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <span class="text-gray-500 flex items-center hover:text-blue-400 transition-colors">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                         </svg>
-                                        点击播放
+                                        播放
                                     </span>
                                 </div>
+                                -->
                             </div>
                         </div>
                     </div>
@@ -768,6 +822,13 @@ async function search() {
 
 // 显示详情 - 修改为支持自定义API
 async function showDetails(id, vod_name, sourceCode) {
+    // 密码保护校验
+    if (window.isPasswordProtected && window.isPasswordVerified) {
+        if (window.isPasswordProtected() && !window.isPasswordVerified()) {
+            showPasswordModal && showPasswordModal();
+            return;
+        }
+    }
     if (!id) {
         showToast('视频ID无效', 'error');
         return;
@@ -798,7 +859,6 @@ async function showDetails(id, vod_name, sourceCode) {
         
         const data = await response.json();
         
-        // ...existing code for showing details...
         const modal = document.getElementById('modal');
         const modalTitle = document.getElementById('modalTitle');
         const modalContent = document.getElementById('modalContent');
@@ -829,7 +889,7 @@ async function showDetails(id, vod_name, sourceCode) {
             episodesReversed = false; // 默认正序
             modalContent.innerHTML = `
                 <div class="flex justify-end mb-2">
-                    <button onclick="toggleEpisodeOrder()" class="px-4 py-2 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 text-white font-semibold rounded-full shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 flex items-center justify-center space-x-2">
+                    <button onclick="toggleEpisodeOrder('${sourceCode}')" class="px-4 py-2 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 text-white font-semibold rounded-full shadow-lg hover:shadow-xl transition-all duration-300 transform flex items-center justify-center space-x-2">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                             <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v3.586L7.707 9.293a1 1 0 00-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 10.586V7z" clip-rule="evenodd" />
                         </svg>
@@ -837,7 +897,7 @@ async function showDetails(id, vod_name, sourceCode) {
                     </button>
                 </div>
                 <div id="episodesGrid" class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2">
-                    ${renderEpisodes(vod_name)}
+                    ${renderEpisodes(vod_name, sourceCode)}
                 </div>
             `;
         } else {
@@ -854,7 +914,14 @@ async function showDetails(id, vod_name, sourceCode) {
 }
 
 // 更新播放视频函数，修改为在新标签页中打开播放页面，并保存到历史记录
-function playVideo(url, vod_name, episodeIndex = 0) {
+function playVideo(url, vod_name, sourceCode, episodeIndex = 0) {
+    // 密码保护校验
+    if (window.isPasswordProtected && window.isPasswordVerified) {
+        if (window.isPasswordProtected() && !window.isPasswordVerified()) {
+            showPasswordModal && showPasswordModal();
+            return;
+        }
+    }
     if (!url) {
         showToast('无效的视频链接', 'error');
         return;
@@ -876,6 +943,7 @@ function playVideo(url, vod_name, episodeIndex = 0) {
     }
     
     // 保存当前状态到localStorage，让播放页面可以获取
+    const currentVideoTitle = vod_name;
     localStorage.setItem('currentVideoTitle', currentVideoTitle);
     localStorage.setItem('currentEpisodeIndex', episodeIndex);
     localStorage.setItem('currentEpisodes', JSON.stringify(currentEpisodes));
@@ -888,7 +956,9 @@ function playVideo(url, vod_name, episodeIndex = 0) {
         url: url,
         episodeIndex: episodeIndex,
         sourceName: sourceName,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        // 重要：将完整的剧集信息也添加到历史记录中
+        episodes: currentEpisodes && currentEpisodes.length > 0 ? [...currentEpisodes] : []
     };
     
     // 保存到观看历史，添加sourceName
@@ -897,27 +967,27 @@ function playVideo(url, vod_name, episodeIndex = 0) {
     }
     
     // 构建播放页面URL，传递必要参数
-    const playerUrl = `player.html?url=${encodeURIComponent(url)}&title=${encodeURIComponent(videoTitle)}&index=${episodeIndex}&source=${encodeURIComponent(sourceName)}`;
+    const playerUrl = `player.html?url=${encodeURIComponent(url)}&title=${encodeURIComponent(videoTitle)}&index=${episodeIndex}&source=${encodeURIComponent(sourceName)}&source_code=${encodeURIComponent(sourceCode)}`;
     
-    // 在新标签页中打开播放页面
-    window.open(playerUrl, '_blank');
+    // 在当前标签页中打开播放页面
+    window.location.href = playerUrl;
 }
 
 // 播放上一集
-function playPreviousEpisode() {
+function playPreviousEpisode(sourceCode) {
     if (currentEpisodeIndex > 0) {
         const prevIndex = currentEpisodeIndex - 1;
         const prevUrl = currentEpisodes[prevIndex];
-        playVideo(prevUrl, currentVideoTitle, prevIndex);
+        playVideo(prevUrl, currentVideoTitle, sourceCode, prevIndex);
     }
 }
 
 // 播放下一集
-function playNextEpisode() {
+function playNextEpisode(sourceCode) {
     if (currentEpisodeIndex < currentEpisodes.length - 1) {
         const nextIndex = currentEpisodeIndex + 1;
         const nextUrl = currentEpisodes[nextIndex];
-        playVideo(nextUrl, currentVideoTitle, nextIndex);
+        playVideo(nextUrl, currentVideoTitle, sourceCode, nextIndex);
     }
 }
 
@@ -928,13 +998,13 @@ function handlePlayerError() {
 }
 
 // 辅助函数用于渲染剧集按钮（使用当前的排序状态）
-function renderEpisodes(vodName) {
+function renderEpisodes(vodName, sourceCode) {
     const episodes = episodesReversed ? [...currentEpisodes].reverse() : currentEpisodes;
     return episodes.map((episode, index) => {
         // 根据倒序状态计算真实的剧集索引
         const realIndex = episodesReversed ? currentEpisodes.length - 1 - index : index;
         return `
-            <button id="episode-${realIndex}" onclick="playVideo('${episode}','${vodName.replace(/"/g, '&quot;')}', ${realIndex})" 
+            <button id="episode-${realIndex}" onclick="playVideo('${episode}','${vodName.replace(/"/g, '&quot;')}', '${sourceCode}', ${realIndex})" 
                     class="px-4 py-2 bg-[#222] hover:bg-[#333] border border-[#333] rounded-lg transition-colors text-center episode-btn">
                 第${realIndex + 1}集
             </button>
@@ -943,16 +1013,16 @@ function renderEpisodes(vodName) {
 }
 
 // 切换排序状态的函数
-function toggleEpisodeOrder() {
+function toggleEpisodeOrder(sourceCode) {
     episodesReversed = !episodesReversed;
     // 重新渲染剧集区域，使用 currentVideoTitle 作为视频标题
     const episodesGrid = document.getElementById('episodesGrid');
     if (episodesGrid) {
-        episodesGrid.innerHTML = renderEpisodes(currentVideoTitle);
+        episodesGrid.innerHTML = renderEpisodes(currentVideoTitle, sourceCode);
     }
     
     // 更新按钮文本和箭头方向
-    const toggleBtn = document.querySelector('button[onclick="toggleEpisodeOrder()"]');
+    const toggleBtn = document.querySelector(`button[onclick="toggleEpisodeOrder('${sourceCode}')"]`);
     if (toggleBtn) {
         toggleBtn.querySelector('span').textContent = episodesReversed ? '正序排列' : '倒序排列';
         const arrowIcon = toggleBtn.querySelector('svg');
@@ -960,6 +1030,88 @@ function toggleEpisodeOrder() {
             arrowIcon.style.transform = episodesReversed ? 'rotate(180deg)' : 'rotate(0deg)';
         }
     }
+}
+
+// 配置文件导入功能
+async function importConfig() {
+    showImportBox(async (file) => {
+        try {
+            // 检查文件类型
+            if (!(file.type === 'application/json' || file.name.endsWith('.json'))) throw '文件类型不正确';
+
+            // 检查文件大小
+            if(file.size > 1024 * 1024 * 10) throw new Error('文件大小超过 10MB');
+
+            // 读取文件内容
+            const content = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = () => reject('文件读取失败');
+                reader.readAsText(file);
+            });
+
+            // 解析并验证配置
+            const config = JSON.parse(content);
+            if (config.name !== 'LibreTV-Settings') throw '配置文件格式不正确';
+
+            // 验证哈希
+            const dataHash = await sha256(JSON.stringify(config.data));
+            if (dataHash !== config.hash) throw '配置文件哈希值不匹配';
+
+            // 导入配置
+            for (let item in config.data) {
+                localStorage.setItem(item, config.data[item]);
+            }
+            
+            showToast('配置文件导入成功，3 秒后自动刷新本页面。', 'success');
+            setTimeout(() => {
+                window.location.reload();
+            }, 3000);
+        } catch (error) {
+            const message = typeof error === 'string' ? error : '配置文件格式错误';
+            showToast(`配置文件读取出错 (${message})`, 'error');
+        }
+    });
+}
+
+// 配置文件导出功能
+async function exportConfig() {
+    // 存储配置数据
+    const config = {};
+
+    // 读取全部 localStorage 项
+    const items = {};
+    for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        items[key] = localStorage.getItem(key);
+    }
+
+    const times = Date.now().toString();
+    config['name'] = 'LibreTV-Settings';  // 配置文件名，用于校验
+    config['time'] = times;               // 配置文件生成时间
+    config['cfgVer'] = '1.0.0';           // 配置文件版本
+    config['data'] = items;               // 配置文件数据
+    config['hash'] = await sha256(JSON.stringify(config['data']));  // 计算数据的哈希值，用于校验
+
+    // 将配置数据保存为 JSON 文件
+    saveStringAsFile(JSON.stringify(config), 'LibreTV-Settings_' + times + '.json');
+}
+
+// 将字符串保存为文件
+function saveStringAsFile(content, fileName) {
+    // 创建Blob对象并指定类型
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    // 生成临时URL
+    const url = window.URL.createObjectURL(blob);
+    // 创建<a>标签并触发下载
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    // 清理临时对象
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
 }
 
 // app.js 或路由文件中
